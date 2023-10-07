@@ -1,0 +1,128 @@
+name: "Repository Zip Delivery"
+author: "Tai4"
+description: "Send a link to the repository zip file via Discord webhook on push"
+branding:
+  icon: 'award'
+
+on:
+  workflow_call:
+    secrets:
+      webhook:
+        required: true
+
+env:
+  DISCORD_EMBED_COLOR: 7505882 # Color code: #7287DA
+  LINK_TO_USER_CONTENT: "https://avatars.githubusercontent.com/"
+  LINK_TO_REPOSITORY_ARCHIVE: "${{ github.server_url }}/${{ github.repository }}/archive"
+  LINK_TO_REPOSITORY_WORKFLOWS: "${{ github.server_url }}/${{ github.repository }}/actions/runs"
+
+jobs:
+  zip-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Commits Info
+        run: |
+          TAB=$(printf '\t')
+          US=$(printf '\037')
+          tsv_to_usv() {
+            INPUT=$(cat)
+            US_ESCAPED_INPUT=${INPUT//$US/\\\\037}
+            USV=${US_ESCAPED_INPUT//$TAB/$US}
+            echo "$USV"
+          }
+
+          COMMITS_JSON='${{ toJson(github.event.commits) }}'
+          jq -r '.[] | [.id, .url, .message] | @tsv' <<< $COMMITS_JSON | tsv_to_usv | {
+            COMMITS_INFO=''
+            while IFS=$US; read -r COMMIT_ID COMMIT_URL COMMIT_MESSAGE; do
+              COMMIT_PARTIAL_ID=${COMMIT_ID:0:7}
+              ZIP_FILE_LINK="$LINK_TO_REPOSITORY_ARCHIVE/$COMMIT_ID.zip"
+              COMMIT_SUMMARY=${COMMIT_MESSAGE%%\\n\\n*}
+              COMMIT_ROW="[\`$COMMIT_PARTIAL_ID\`]($COMMIT_URL) - [Download Zip]($ZIP_FILE_LINK)  |  $COMMIT_SUMMARY"
+              COMMITS_INFO="$COMMITS_INFO$COMMIT_ROW\n"
+            done
+            COMMITS_INFO=${COMMITS_INFO%\\n}
+            echo "commits_info=$COMMITS_INFO" >> $GITHUB_ENV
+          }
+
+      - name: Build Push Info
+        run: |
+          HEAD_COMMIT_ID='${{ github.event.head_commit.id }}'
+          HEAD_COMMIT_PARTIAL_ID=${HEAD_COMMIT_ID:0:7}
+          HEAD_COMMIT_URL='${{ github.event.head_commit.url }}'
+          HEAD_COMMIT_ZIP_FILE_LINK="$LINK_TO_REPOSITORY_ARCHIVE/$HEAD_COMMIT_ID.zip"
+          HEAD_COMMIT_INFO="The head commit is [\`$HEAD_COMMIT_PARTIAL_ID\`]($HEAD_COMMIT_URL), whose zip file is [here]($HEAD_COMMIT_ZIP_FILE_LINK) for download!"
+          
+          COMPARE_LINK='${{ github.event.compare }}'
+          COMPARE_INFO="You can also check out the changes in this push, [here]($COMPARE_LINK) it comes."
+
+          PUSH_INFO="$HEAD_COMMIT_INFO\n$COMPARE_INFO"
+          echo "push_info=$PUSH_INFO" >> $GITHUB_ENV
+
+      - name: Build Discord Embed Description
+        run: |
+          DISCORD_EMBED_DESCRIPTION='${{ env.push_info }}\n\n${{ env.commits_info }}'
+          {
+            echo 'discord_embed_description<<EOF'
+            printf "$DISCORD_EMBED_DESCRIPTION"
+            echo
+            echo EOF
+          } >> "$GITHUB_ENV"
+
+      - name: Build Running Workflow URL
+        run: |
+          RUNNING_WORKFLOW_URL='${{ env.LINK_TO_REPOSITORY_WORKFLOWS }}/${{ github.run_id }}'
+          echo "running_workflow_url=$RUNNING_WORKFLOW_URL" >> $GITHUB_ENV
+
+      - name: Build Push User Profile URL
+        run: |
+          PUSH_USER_PROFILE_URL='${{ github.server_url }}/${{ github.event.pusher.name }}'
+          echo "push_user_profile_url=$PUSH_USER_PROFILE_URL" >> $GITHUB_ENV
+
+      - name: Build Push User Profile Icon URL
+        run: |
+          PUSH_USER_PROFILE_URL='${{ env.LINK_TO_USER_CONTENT }}/${{ github.event.pusher.name }}'
+          echo "push_user_profile_icon_url=$PUSH_USER_PROFILE_URL" >> $GITHUB_ENV
+
+      - name: Build Discord Embed Title
+        run: |
+          REPOSITORY_OWNER_NAME=${{ github.repository_owner }}
+          REPOSITORY_AND_OWNER_NAME='${{ github.repository }}'
+          REPOSITORY_NAME=${REPOSITORY_AND_OWNER_NAME#"$REPOSITORY_OWNER_NAME/"}
+          DISCORD_EMBED_TITLE="[$REPOSITORY_NAME:${{ github.ref_name }}] Zip Delivery!"
+          echo "discord_embed_title=$DISCORD_EMBED_TITLE" >> $GITHUB_ENV
+
+      - name: Build Discord Webhook JSON
+        run: |
+          DISCORD_WEBHOOK_JSON=$(
+            jq -n -c \
+              --arg author_name '${{ github.event.pusher.name }}' \
+              --arg author_url '${{ env.push_user_profile_url }}' \
+              --arg author_icon_url '${{ env.push_user_profile_icon_url }}' \
+              --arg discord_embed_title '${{ env.discord_embed_title }}' \
+              --arg discord_embed_color '${{ env.DISCORD_EMBED_COLOR }}' \
+              --arg running_workflow_url '${{ env.running_workflow_url}}' \
+              --arg discord_embed_description '${{ env.discord_embed_description }}' \
+              '
+              {
+                "embeds": [
+                  {
+                    "author": {
+                      "name": $author_name,
+                      "url": $author_url,
+                      "icon_url": $author_icon_url
+                    },
+                    "title": $discord_embed_title,
+                    "url": $running_workflow_url,
+                    "description": $discord_embed_description,
+                    "color": $discord_embed_color
+                  }
+                ]
+              }
+              '
+          )
+          echo "discord_webhook_json=$DISCORD_WEBHOOK_JSON" >> $GITHUB_ENV
+
+      - name: Execute Discord Webhook
+        run: |
+          curl -X POST '${{ secrets.webhook }}' -H 'Content-Type: application/json' -d '${{ env.discord_webhook_json }}'
