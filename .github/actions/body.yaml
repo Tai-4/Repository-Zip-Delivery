@@ -17,7 +17,7 @@ env:
   LINK_TO_REPOSITORY_WORKFLOWS: "${{ github.server_url }}/${{ github.repository }}/actions/runs"
 
 jobs:
-  zip-and-release:
+  deliver-repository-zip:
     runs-on: ubuntu-latest
     steps:
       - name: Build Commits Info
