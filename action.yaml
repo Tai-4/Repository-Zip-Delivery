@@ -10,14 +10,14 @@ on:
       webhook:
         required: true
 
-env:
-  DISCORD_EMBED_COLOR: 7505882 # Color code: #7287DA
-  LINK_TO_USER_CONTENT: "https://avatars.githubusercontent.com/"
-  LINK_TO_REPOSITORY_ARCHIVE: "${{ github.server_url }}/${{ github.repository }}/archive"
-  LINK_TO_REPOSITORY_WORKFLOWS: "${{ github.server_url }}/${{ github.repository }}/actions/runs"
-
 jobs:
   deliver-repository-zip:
+    env:
+      DISCORD_EMBED_COLOR: 7505882 # Color code: #7287DA
+      LINK_TO_USER_CONTENT: "https://avatars.githubusercontent.com/"
+      LINK_TO_REPOSITORY_ARCHIVE: "${{ github.server_url }}/${{ github.repository }}/archive"
+      LINK_TO_REPOSITORY_WORKFLOWS: "${{ github.server_url }}/${{ github.repository }}/actions/runs"
+
     runs-on: ubuntu-latest
     steps:
       - name: Build Commits Info
